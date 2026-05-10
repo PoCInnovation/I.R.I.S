@@ -35,8 +35,8 @@ If you're interested in how the project is organized at a higher level, please c
 ## Our PoC team ❤️
 
 Developers
-| [<img src="https://github.com/Keuchnotkush.png?size=85" width=85><br><sub>Cheikh F.</sub>](https://github.com/MrZalTy) | [<img src="https://github.com/Skeezko.png?size=85" width=85><br><sub>Hesham C.</sub>](https://github.com/MrZalTy) | [<img src="https://github.com/MarwanBouhessoun.png?size=85" width=85><br><sub>Marwan B.</sub>](https://github.com/MrZalTy)
-| :---: | :---: | :---: |
+| [<img src="https://github.com/Keuchnotkush.png?size=85" width=85><br><sub>Cheikh F.</sub>](https://github.com/MrZalTy) | [<img src="https://github.com/Skeezko.png?size=85" width=85><br><sub>Hesham C.</sub>](https://github.com/MrZalTy) | [<img src="https://github.com/MarwanBouhessoun.png?size=85" width=85><br><sub>Marwan B.</sub>](https://github.com/MrZalTy) | [<img src="https://github.com/AntoineLesueur.png?size=85" width=85><br><sub>Marwan B.</sub>](https://github.com/MrZalTy)
+| :---: | :---: | :---: | :---: |
 
 Manager
 | [<img src="https://github.com/t1m0t-p.png?size=85" width=85><br><sub>Timothée P-B.</sub>](https://github.com/adrienfort)
