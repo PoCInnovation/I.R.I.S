@@ -1,0 +1,9 @@
+[project]
+name = "i-r-i-s"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "opencv-python>=4.13.0.92",
+    "ultralytics>=8.4.48",
+]
