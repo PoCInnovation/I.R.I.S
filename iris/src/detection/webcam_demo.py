@@ -7,6 +7,7 @@ from .face_detector import FaceDetector
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MODEL_PATH = PROJECT_ROOT / "models" / "yolov11n-face.pt"
+CAPTURES_DIR = PROJECT_ROOT.parent / "captures"
 
 
 def main() -> None:
@@ -16,6 +17,7 @@ def main() -> None:
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         raise RuntimeError("Failed to open webcam (index 0)")
+    CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
     fps_smoothed = 0.0
     frame_n = 0
     try:
@@ -32,21 +34,43 @@ def main() -> None:
             if frame_n % 10 == 0:
                 print(f">> frame {frame_n}  faces={len(faces)}  fps={fps_smoothed:.1f}")
 
-            for face in faces:
-                cv2.rectangle(frame, (face.x1, face.y1), (face.x2, face.y2),
-                              (0, 255, 0), 2)
-                cv2.putText(frame, f"{face.confidence:.2f}",
-                            (face.x1, face.y1 - 8),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            crops = [frame[f.y1:f.y2, f.x1:f.x2].copy() for f in faces]
 
+            for face in faces:
+                w = face.x2 - face.x1
+                h = face.y2 - face.y1
+                L = min(w, h) // 4
+                color = (0,0,240) #  
+                thick = 2
+                cv2.line(frame, (face.x1, face.y1), (face.x1 + L, face.y1), color, thick)
+                cv2.line(frame, (face.x1, face.y1), (face.x1, face.y1 + L), color, thick)
+                cv2.line(frame, (face.x2, face.y1), (face.x2 - L, face.y1), color, thick)
+                cv2.line(frame, (face.x2, face.y1), (face.x2, face.y1 + L), color, thick)
+                cv2.line(frame, (face.x1, face.y2), (face.x1 + L, face.y2), color, thick)
+                cv2.line(frame, (face.x1, face.y2), (face.x1, face.y2 - L), color, thick)
+                cv2.line(frame, (face.x2, face.y2), (face.x2 - L, face.y2), color, thick)
+                cv2.line(frame, (face.x2, face.y2), (face.x2, face.y2 - L), color, thick)
+                cv2.putText(frame, f"{face.confidence:.2f}", (face.x1, face.y1 - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                
             elapsed = time.perf_counter() - frame_start
             instant_fps = 1.0 / elapsed if elapsed > 0 else 0.0
             fps_smoothed = 0.9 * fps_smoothed + 0.1 * instant_fps
             cv2.putText(frame, f"FPS: {fps_smoothed:.1f}",
-                        (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                        (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 240), 2)
             cv2.imshow("I.R.I.S", frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
+
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q"):
                 break
+            if key == ord("s"):
+                ts = int(time.time())
+                for i, crop in enumerate(crops):
+                    if crop.size == 0:
+                        continue
+                    path = CAPTURES_DIR / f"face_{ts}_{i}.jpg"
+                    cv2.imwrite(str(path), crop)
+                    print(f">> saved {path}")
     finally:
         cap.release()
         cv2.destroyAllWindows()
