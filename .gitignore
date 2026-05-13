@@ -1,0 +1,5 @@
+.venv/
+.env
+IRIS.pdf
+__pycache__/
+context/
