@@ -21,7 +21,9 @@ async def ft_scraper(urls):
         return None
 
     user_dir = os.path.join(os.getcwd(), "context")
-
+    if not os.path.exists(user_dir):
+        print("Please follow the instructions in scraper.py for better results")
+        
     async with Stealth().use_async(async_playwright()) as p:
 
         browser = await p.chromium.launch_persistent_context(
@@ -80,6 +82,7 @@ if __name__ == "__main__":
     ]
     
     results = asyncio.run(ft_scraper(urls))
-    for result in results:
-        print(result)
-        print('\n\n')
+    if results != None:
+        for result in results:
+            print(result)
+            print('\n\n')
