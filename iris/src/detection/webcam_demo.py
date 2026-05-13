@@ -2,7 +2,6 @@ import time
 from pathlib import Path
 
 import cv2
-
 from .face_detector import FaceDetector
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -18,11 +17,14 @@ def main() -> None:
         q  - quit
     """
     print(">> loading model...")
-    detector = FaceDetector(model_path=MODEL_PATH)
+    detector = FaceDetector(model_path=MODEL_PATH, imgsz=192)
     print(">> opening camera...")
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         raise RuntimeError("Failed to open webcam (index 0)")
+    # Keep at most 1 frame queued in the driver — read() then always returns the
+    # newest frame instead of one from N processing-cycles ago.
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
 
     # Exponential moving average of FPS — raw per-frame FPS jumps around a lot,
@@ -76,7 +78,7 @@ def main() -> None:
             # 90% old value + 10% new = smooth but still responsive
             fps_smoothed = 0.9 * fps_smoothed + 0.1 * instant_fps
             cv2.putText(frame, f"FPS: {fps_smoothed:.1f}",
-                        (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 240), 2)
+                        (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 240, 0), 2)
             cv2.imshow("I.R.I.S", frame)
 
             # waitKey both pumps the GUI event loop (mandatory for imshow) and
