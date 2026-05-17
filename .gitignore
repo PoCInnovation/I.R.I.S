@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 iris/src/models/
 iris/src/output/
+iris/captures/
 *.jpg
 *.jpeg
 *.png
+*.egg-info
