@@ -2,7 +2,6 @@ import asyncio
 from bs4 import BeautifulSoup
 import os
 import random
-from models import TargetInfo
 
 
 
