@@ -1,9 +1,9 @@
 import os
 import json
-from google import genai
+from openai import OpenAI
 
 
-def ft_call_gemini(scraped_data, api_key):
+def ft_call_chatgpt(scraped_data, api_key):
 
     system_prompt = """
     Tu es un expert en OSINT. Analyse les textes bruts suivants, extraits de plusieurs pages web différentes concernant la même cible.
@@ -30,14 +30,14 @@ def ft_call_gemini(scraped_data, api_key):
     """
 
     try:
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model = "gemini-3.1-flash-lite",
-            contents = f"{system_prompt}\n\nDATA\n\n{scraped_data}",
-            config = {"response_mime_type": "application/json"}
+        client = OpenAI(api_key=api_key)
+        response = client.responses.create(
+            model = "gpt-5.5",
+            instructions = system_prompt,
+            input = scraped_data,
         )
 
-        results = json.loads(response.text)
+        results = json.loads(response.output_text)
         return results
     except Exception as e:
-        return f"Error during Gemini API call: {e}"
+        return f"Error during ChatGPT API call: {e}"

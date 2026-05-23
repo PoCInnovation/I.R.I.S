@@ -4,15 +4,15 @@ from playwright_stealth import Stealth
 from dotenv import load_dotenv
 from default import ft_default
 import os
-from gemini import ft_call_gemini
+from chatgpt import ft_call_chatgpt
 
 
 async def ft_scraper(urls):
 
     load_dotenv()
-    gemini_api_key = os.getenv("GEMINI_API_KEY")
-    if not gemini_api_key:
-        return "Please set GEMINI_API_KEY in .env"
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    if not openai_api_key:
+        return "Please set OPENAI_API_KEY in .env"
 
     user_dir = os.path.join(os.getcwd(), "context")
     if not os.path.exists(user_dir):
@@ -34,6 +34,7 @@ async def ft_scraper(urls):
         # to do this do not forget to pass the headless argument to False in the lines above
         # please do not use your personal accounts use fake ones that you have already created before
         ### await asyncio.sleep(600)
+        ### return "Context successfully set! You can now run the script again for better results"
 
         tasks = []
         for url in urls:
@@ -50,7 +51,7 @@ async def ft_scraper(urls):
         await browser.close()
 
     scraped_data = "\n".join(results)
-    return ft_call_gemini(scraped_data, gemini_api_key)
+    return ft_call_chatgpt(scraped_data, openai_api_key)
 
 
 
