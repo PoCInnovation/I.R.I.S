@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from default import ft_default
 import os
 from chatgpt import ft_call_chatgpt
+import shutil
 
 
 async def ft_scraper(urls):
@@ -28,7 +29,7 @@ async def ft_scraper(urls):
             args=["--disable-blink-features=AutomationControlled"]
         )
         
-        # if it is your first time running this script you need to uncomment this line below which will provides you
+        # if it is your first time running this script you need to uncomment these lines below which will provides you
         # 10min to connect manually on linkedin insta twitter facebook tiktok or any other platform you need or want
         # and ensure that you allow all cookies or close any pop up and then you can close all the tabs
         # to do this do not forget to pass the headless argument to False in the lines above
@@ -51,6 +52,9 @@ async def ft_scraper(urls):
         await browser.close()
 
     scraped_data = "\n".join(results)
+    shutil.rmtree('./context/Default/Cache')
+    shutil.rmtree('./context/Default/Code Cache')
+    shutil.rmtree('./context/Default/Service Worker')
     return ft_call_chatgpt(scraped_data, openai_api_key)
 
 
