@@ -5,7 +5,7 @@ import random
 
 
 
-async def ft_default(browser, url):
+async def ft_get_and_parse_html(browser, url):
 
     page = await browser.new_page()
 

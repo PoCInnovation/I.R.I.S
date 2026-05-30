@@ -2,7 +2,7 @@ import asyncio
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 from dotenv import load_dotenv
-from default import ft_default
+from parser import ft_get_and_parse_html
 import os
 from chatgpt import ft_call_chatgpt
 import shutil
@@ -45,7 +45,7 @@ async def ft_scraper(urls):
         # launch all scraping tasks for each url
         tasks = []
         for url in urls:
-            task = asyncio.create_task(ft_default(browser, url))
+            task = asyncio.create_task(ft_get_and_parse_html(browser, url))
             tasks.append(task)
         
         # collect tasks results as soon as each one is complete and then format them all
@@ -66,19 +66,3 @@ async def ft_scraper(urls):
     # join all results separating them with a new line to send it properly to chatgpt
     scraped_data = "\n".join(results)
     return ft_call_chatgpt(scraped_data, openai_api_key)
-
-
-
-#if __name__ == "__main__":
-#
-#    urls = [
-#        "https://www.linkedin.com/in/thomas-pesquet/",
-#        "https://www.facebook.com/ESAThomasPesquet/",
-#        "https://www.instagram.com/thom_astro/",
-#        "https://www.tiktok.com/@thom_astro",
-#        "https://x.com/Thom_astro",
-#        "https://www.esa.int/Space_in_Member_States/France/L_astronaute_de_l_ESA_Thomas_Pesquet"
-#    ]
-#    
-#    results = asyncio.run(ft_scraper(urls))
-#    print(results)
