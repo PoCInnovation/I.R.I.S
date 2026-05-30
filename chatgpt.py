@@ -5,6 +5,7 @@ from openai import OpenAI
 
 def ft_call_chatgpt(scraped_data, api_key):
 
+    # define the instructions for chatgpt
     system_prompt = """
     Tu es un expert en OSINT. Analyse les textes bruts suivants, extraits de plusieurs pages web différentes concernant la même cible.
     TA MISSION : Mets en corrélation les différentes infos des sites pour trier, dédoublonner et identifier la cible précisément et efficacement. 
@@ -31,12 +32,15 @@ def ft_call_chatgpt(scraped_data, api_key):
 
     try:
         client = OpenAI(api_key=api_key)
+        
+        # send instructions and raw data to chatgpt
         response = client.responses.create(
             model = "gpt-5.5",
             instructions = system_prompt,
             input = scraped_data,
         )
 
+        # parse chatgpt response into python dictionnary 
         results = json.loads(response.output_text)
         return results
     except Exception as e:

@@ -10,12 +10,14 @@ async def ft_default(browser, url):
     page = await browser.new_page()
 
     try:
+        # go to the url and simulate human behiavor
         await page.goto(url, wait_until="domcontentloaded")
         await page.wait_for_timeout(5000)
         await asyncio.sleep(random.uniform(2, 4))
         await page.mouse.wheel(0, 600)
         await asyncio.sleep(random.uniform(1, 2))
         
+        # get main first then body if main not present
         html = await page.evaluate('''() => {
             const main = document.querySelector('main');
             if (main) return main.innerHTML;
@@ -23,10 +25,13 @@ async def ft_default(browser, url):
         }''')
         soup = BeautifulSoup(html, "html.parser")
 
+        # remove useless html elements
         for element in soup(["script", "style", "nav", "footer", "noscript", "svg"]):
             element.decompose()
 
         await page.close()
+        
+        # extract only text and join it all with a separator
         content = [text for text in soup.stripped_strings]
         content = ' || '.join(content)
         return url, content
