@@ -1,5 +1,10 @@
 .venv/
-.env
-IRIS.pdf
 __pycache__/
-context/
+*.pyc
+iris/src/models/
+iris/src/output/
+iris/captures/
+*.jpg
+*.jpeg
+*.png
+*.egg-info
