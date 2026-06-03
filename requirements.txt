@@ -1,0 +1,6 @@
+asyncio
+bs4
+playwright
+dotenv
+playwright-stealth
+openai
