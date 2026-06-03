@@ -1,3 +1,4 @@
+# To run : python -m iris.src.detection.webcam_demo
 import time
 from pathlib import Path
 
@@ -87,14 +88,18 @@ def main() -> None:
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
                 break
-            if key == ord("s"):
-                ts = int(time.time())
-                for i, crop in enumerate(crops):
-                    if crop.size == 0:  # zero-area bbox at a frame edge
-                        continue
-                    path = CAPTURES_DIR / f"face_{ts}_{i}.jpg"
-                    cv2.imwrite(str(path), crop)
-                    print(f">> saved {path}")
+            # if key == ord("s"):
+            #     ts = int(time.time())
+            #     for i, crop in enumerate(crops):
+            #         if crop.size == 0:  # zero-area bbox at a frame edge
+            #             continue
+            #         path = CAPTURES_DIR / f"face_{ts}_{i}.jpg"
+            #         cv2.imwrite(str(path), crop)
+            #         print(f">> saved {path}")
+            # Instead of saving on keypress, we'll save every detected face just once. maybe outside the while true looop ? or we can save the first 10 faces detected and then stop saving ?
+
+
+
     finally:
         cap.release()
         cv2.destroyAllWindows()
