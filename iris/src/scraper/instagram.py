@@ -3,20 +3,25 @@ from dataclasses import dataclass
 import subprocess
 import os
 from pathlib import Path
-import datetime
+import urllib
 
 
+
+# create strcut to store collected infos on instagram stories
+@dataclass
+class StoryData:
+    date: str
+    caption: str
+    caption_mentions: list[str]
 
 # create struct to store collected infos on an instagram post
 @dataclass
 class PostData:
-    shortcode: str
-    date: datetime
+    date: str
     location: str
     title: str
     caption: str
     tagged_users: list[str]
-    media_urls: list[str]
 
 # create struct to store the collected infos on the target instragram profile
 @dataclass
@@ -27,7 +32,6 @@ class InstagramData:
     bio: str
     bio_hashtags: list[str]
     bio_mentions: list[str]
-    pfp_url: str
     followees_count: int
     followers_count: int
     external_url: str
@@ -35,6 +39,7 @@ class InstagramData:
     followees: list[str]
     followed_hashtags: list[str]
     posts: list[PostData]
+    stories: list[StoryData]
 
 
 def ft_instaloader(url):
@@ -74,14 +79,14 @@ def ft_instaloader(url):
             try:
                 L.load_session_from_file(usr)
             except Exception as e:
-                print(f"Failed to load session: {e}")
+                print(f"Failed to load {usr} session: {e}")
                 session_file = Path.home().joinpath(".config", "instaloader", f"session-{usr}")
                 os.remove(session_file)
                 print("Session file deleted, you need to run the script again to create a new one")
                 return
 
         except Exception as e:
-            print(f"Failed to load session: {e}")
+            print(f"Failed to load {usr} session: {e}")
             session_file = Path.home().joinpath(".config", "instaloader", f"session-{usr}")
             os.remove(session_file)
             print("Session file deleted, you need to run the script again to create a new one")
@@ -93,7 +98,7 @@ def ft_instaloader(url):
     try:
         profile = instaloader.Profile.from_username(L.context, target)
     except Exception as e:
-        print(f"Failed to load target: {e}")
+        print(f"Failed to load {target} profile: {e}")
         return
 
     # collect infos that can be collected even if the account is in private mode
@@ -103,23 +108,41 @@ def ft_instaloader(url):
     bio = profile.biography
     bio_hashtags = profile.biography_hashtags
     bio_mentions = profile.biography_mentions
-    pfp_url = profile.profile_pic_url
     followees_count = profile.followees
     followers_count = profile.followers
     external_url = profile.external_url
     media_count = profile.mediacount
+    has_public_story = profile.has_public_story
+
+    # fetch target pfp url then download it
+    target_dir = f"./{username}_insta_profile"
+    os.makedirs(target_dir, exist_ok=True)
+    try:
+        pfp_url = profile.profile_pic_url
+        urllib.request.urlretrieve(pfp_url, os.path.join(target_dir, f"{username}.jpg"))
+    except Exception as e:
+        print(f"Failed to download {username} pfp: {e}")
 
     # collect infos that can not be collected if the account is in private mode
     followees = []
     followed_hashtags = []
     posts = []
+    stories = []
     if not private:
-        # get all followees usernames
-        try:
-            for followee in profile.get_followees():
-                followees.append(followee.username)
-        except Exception as e:
-            print(f"Followees fetching not completed: {e}")
+        # ask user if he wants to get target followees usernames
+        user_response = ""
+        while user_response not in ["y", "n"]:
+            user_response = input(f"{username} has {followees_count} followees, do you want to get their usernames? [y/N]: ").strip().lower()
+            if user_response == "":
+                user_response = "n"
+
+        # if yes then get all followees usernames
+        if user_response == "y":
+            try:
+                for followee in profile.get_followees():
+                    followees.append(followee.username)
+            except Exception as e:
+                print(f"Followees fetching not completed: {e}")
         
         # get all followed hashtags names
         try:
@@ -128,50 +151,94 @@ def ft_instaloader(url):
         except Exception as e:
             print(f"Followed hashtags fetching not completed: {e}")
 
-        # get all posts
-        try:
-            for post in profile.get_posts():
-                try:
-                    shortcode = post.shortcode
-                    date = post.date_local
+        # ask user if he wants to get target posts
+        user_response = ""
+        while user_response not in ["y", "n"]:
+            user_response = input(f"{username} has {media_count} posts, do you want to scrap them? [y/N]: ").strip().lower()
+            if user_response == "":
+                user_response = "n"
+
+        # if yes then get all posts
+        if user_response == "y":
+            try:
+                for post in profile.get_posts():
                     try:
-                        location = post.location.name if post.location else None
-                    except Exception as e:
-                        print(f"Failed to fetch post {shortcode} location: {e}")
-                        location = None
-                    title = post.title if post.title else None
-                    caption = post.caption
-                    tagged_users = post.tagged_users
+                        date = str(post.date_local)
+                        try:
+                            location = post.location.name if post.location else None
+                        except Exception as e:
+                            print(f"Failed to fetch post location: {e}")
+                            location = None
+                        title = post.title if post.title else None
+                        caption = post.caption
+                        tagged_users = post.tagged_users
 
-                    media_urls = []
-                    # if post is a sidecar then iterate over the nodes and check if it is a video or not and get url
-                    if post.typename == "GraphSidecar":
-                        for node in post.get_sidecar_nodes():
-                            if node.is_video:
-                                media_urls.append(node.video_url)
-                            else:
-                                media_urls.append(node.display_url)
-                    # if post is not a sidecar then check if it is a video or not and get url
-                    else:
-                        if post.is_video:
-                            media_urls.append(post.video_url)
-                        else:
-                            media_urls.append(post.url)
-
-                    post_data = PostData(shortcode, date, location, title, caption, tagged_users, media_urls)
-                    posts.append(post_data)
-                except Exception as e:
-                    print(f"Failed to fetch post {shortcode}: {e}")
-                    continue
-        except Exception as e:
-            print(f"Posts fetching not completed: {e}")
+                        # download all posts
+                        os.chdir(target_dir)
+                        L.download_post(post, target=f"{username}_posts")
+                        os.chdir("..")
     
-    return InstagramData(private, username, full_name, bio, bio_hashtags, bio_mentions, pfp_url, followees_count, followers_count, external_url, media_count, followees, followed_hashtags, posts)
+                        post_data = PostData(date, location, title, caption, tagged_users)
+                        posts.append(post_data)
+                    except Exception as e:
+                        print(f"Failed to fetch post: {e}")
+                        continue
+            except Exception as e:
+                print(f"Posts fetching not completed: {e}")
+
+        if has_public_story:
+            # ask user if he wants to get target stories
+            user_response = ""
+            while user_response not in ["y", "n"]:
+                user_response = input(f"{username} has stories, do you want to scrap them? [y/N]: ").strip().lower()
+                if user_response == "":
+                    user_response = "n"
+
+            # if yes then get stories
+            try:
+                for story in L.get_stories(userids=[profile.userid]):
+                    try:    
+                        for item in story.get_items():
+                            date = str(item.date_local)
+                            caption = item.caption
+                            caption_mentions = item.caption_mentions
+
+                            # download all stories
+                            os.chdir(target_dir)
+                            L.download_storyitem(item, target=f"{username}_stories")
+                            os.chdir("..")
+
+                        story_data = StoryData(date, caption, caption_mentions)
+                        stories.append(story_data)
+                    except Exception as e:
+                        print(f"Failed to fetch story: {e}")
+                        continue
+            except Exception as e:
+                print(f"Stories fetching not completed: {e}")
+
+    # delete all useless file in posts dir to reduce disk usage
+    posts_dir = f"./{username}_insta_profile/{username}_posts"
+    if os.path.exists(posts_dir):
+        posts_files = os.listdir(posts_dir)
+        for file in posts_files:
+            if file.endswith(".json.xz") or file.endswith(".txt"):
+                os.remove(os.path.join(posts_dir, file))
+
+    # delete all useless file in stories dir to reduce disk usage
+    stories_dir = f"./{username}_insta_profile/{username}_stories"
+    if os.path.exists(stories_dir):
+        stories_files = os.listdir(stories_dir)
+        for file in stories_files:
+            if file.endswith(".json.xz"):
+                os.remove(os.path.join(stories_dir, file))
+
+    return InstagramData(private, username, full_name, bio, bio_hashtags, bio_mentions, followees_count, followers_count, external_url, media_count, followees, followed_hashtags, posts, stories)
 
 
 
 
 if __name__ == "__main__":
-    url = "https://www.instagram.com/teeqzyk/"
+    account = input("Enter the target username: ").strip()
+    url = f"https://www.instagram.com/{account}/"
     res = ft_instaloader(url)
     print(res)
