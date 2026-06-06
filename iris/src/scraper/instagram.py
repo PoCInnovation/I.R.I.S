@@ -3,7 +3,20 @@ from dataclasses import dataclass
 import subprocess
 import os
 from pathlib import Path
+import datetime
 
+
+
+# create struct to store collected infos on an instagram post
+@dataclass
+class PostData:
+    shortcode: str
+    date: datetime
+    location: str
+    title: str
+    caption: str
+    tagged_users: list[str]
+    media_urls: list[str]
 
 # create struct to store the collected infos on the target instragram profile
 @dataclass
@@ -21,6 +34,7 @@ class InstagramData:
     media_count: int
     followees: list[str]
     followed_hashtags: list[str]
+    posts: list[PostData]
 
 
 def ft_instaloader(url):
@@ -98,22 +112,66 @@ def ft_instaloader(url):
     # collect infos that can not be collected if the account is in private mode
     followees = []
     followed_hashtags = []
+    posts = []
     if not private:
+        # get all followees usernames
         try:
             for followee in profile.get_followees():
                 followees.append(followee.username)
-
+        except Exception as e:
+            print(f"Followees fetching not completed: {e}")
+        
+        # get all followed hashtags names
+        try:
             for hashtag in profile.get_followed_hashtags():
                 followed_hashtags.append(hashtag.name)
         except Exception as e:
-            print(f"Followees or followed hashtags fetching not completed: {e}")
+            print(f"Followed hashtags fetching not completed: {e}")
+
+        # get all posts
+        try:
+            for post in profile.get_posts():
+                try:
+                    shortcode = post.shortcode
+                    date = post.date_local
+                    try:
+                        location = post.location.name if post.location else None
+                    except Exception as e:
+                        print(f"Failed to fetch post {shortcode} location: {e}")
+                        location = None
+                    title = post.title if post.title else None
+                    caption = post.caption
+                    tagged_users = post.tagged_users
+
+                    media_urls = []
+                    # if post is a sidecar then iterate over the nodes and check if it is a video or not and get url
+                    if post.typename == "GraphSidecar":
+                        for node in post.get_sidecar_nodes():
+                            if node.is_video:
+                                media_urls.append(node.video_url)
+                            else:
+                                media_urls.append(node.display_url)
+                    # if post is not a sidecar then check if it is a video or not and get url
+                    else:
+                        if post.is_video:
+                            media_urls.append(post.video_url)
+                        else:
+                            media_urls.append(post.url)
+
+                    post_data = PostData(shortcode, date, location, title, caption, tagged_users, media_urls)
+                    posts.append(post_data)
+                except Exception as e:
+                    print(f"Failed to fetch post {shortcode}: {e}")
+                    continue
+        except Exception as e:
+            print(f"Posts fetching not completed: {e}")
     
-    return InstagramData(private, username, full_name, bio, bio_hashtags, bio_mentions, pfp_url, followees_count, followers_count, external_url, media_count, followees, followed_hashtags)
+    return InstagramData(private, username, full_name, bio, bio_hashtags, bio_mentions, pfp_url, followees_count, followers_count, external_url, media_count, followees, followed_hashtags, posts)
 
 
 
 
 if __name__ == "__main__":
-    url = "https://www.instagram.com/pocinnovation/"
+    url = "https://www.instagram.com/teeqzyk/"
     res = ft_instaloader(url)
     print(res)
