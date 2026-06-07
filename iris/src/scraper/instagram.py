@@ -1,11 +1,20 @@
 import instaloader
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 import subprocess
 import os
 from pathlib import Path
 import urllib
+import json
 
 
+
+# create strcut to store collected infos on instagram highlights
+@dataclass
+class HighlightData:
+    title: str
+    date: str
+    caption: str
+    caption_mentions: list[str]
 
 # create strcut to store collected infos on instagram stories
 @dataclass
@@ -40,6 +49,7 @@ class InstagramData:
     followed_hashtags: list[str]
     posts: list[PostData]
     stories: list[StoryData]
+    highlights: list[HighlightData]
 
 
 def ft_instaloader(url):
@@ -73,7 +83,8 @@ def ft_instaloader(url):
                 subprocess.run(["instaloader", "--load-cookies", "firefox"])
             except Exception as e:
                 print(f"Failed to import cookies: {e}")
-                return
+                print("Fallback on default scraping")
+                return url, None
             
             # load session file if error then delete session file 
             try:
@@ -82,24 +93,28 @@ def ft_instaloader(url):
                 print(f"Failed to load {usr} session: {e}")
                 session_file = Path.home().joinpath(".config", "instaloader", f"session-{usr}")
                 os.remove(session_file)
-                print("Session file deleted, you need to run the script again to create a new one")
-                return
+                print("Session file deleted")
+                print("Fallback on default scraping")
+                return url, None
 
         except Exception as e:
             print(f"Failed to load {usr} session: {e}")
             session_file = Path.home().joinpath(".config", "instaloader", f"session-{usr}")
             os.remove(session_file)
-            print("Session file deleted, you need to run the script again to create a new one")
-            return
+            print("Session file deleted")
+            print("Fallback on default scraping")
+            return url, None
     else:
-        return
+        print("Fallback on default scraping")
+        return url, None
 
     # load target profile
     try:
         profile = instaloader.Profile.from_username(L.context, target)
     except Exception as e:
         print(f"Failed to load {target} profile: {e}")
-        return
+        print("Fallback on default scraping")
+        return url, None
 
     # collect infos that can be collected even if the account is in private mode
     private = profile.is_private
@@ -128,6 +143,7 @@ def ft_instaloader(url):
     followed_hashtags = []
     posts = []
     stories = []
+    highlights = []
     if not private:
         # ask user if he wants to get target followees usernames
         user_response = ""
@@ -195,26 +211,58 @@ def ft_instaloader(url):
                     user_response = "n"
 
             # if yes then get stories
+            if user_response == "y":
+                try:
+                    for story in L.get_stories(userids=[profile.userid]):
+                        try:    
+                            for item in story.get_items():
+                                date = str(item.date_local)
+                                caption = item.caption
+                                caption_mentions = item.caption_mentions
+
+                                # download all stories
+                                os.chdir(target_dir)
+                                L.download_storyitem(item, target=f"{username}_stories")
+                                os.chdir("..")
+
+                            story_data = StoryData(date, caption, caption_mentions)
+                            stories.append(story_data)
+                        except Exception as e:
+                            print(f"Failed to fetch story: {e}")
+                            continue
+                except Exception as e:
+                    print(f"Stories fetching not completed: {e}")
+        
+        # ask user if he wants to get target highlights
+        user_response = ""
+        while user_response not in ["y", "n"]:
+            user_response = input(f"Do you want to scrap {username} highlights? [y/N]: ").strip().lower()
+            if user_response == "":
+                user_response = "n"
+
+        # if yes then get all highlights
+        if user_response == "y":
             try:
-                for story in L.get_stories(userids=[profile.userid]):
-                    try:    
-                        for item in story.get_items():
+                for highlight in L.get_highlights(profile):
+                    try:
+                        title = highlight.title
+                        for item in highlight.get_items():
                             date = str(item.date_local)
                             caption = item.caption
                             caption_mentions = item.caption_mentions
 
-                            # download all stories
+                            # download all highlights
                             os.chdir(target_dir)
-                            L.download_storyitem(item, target=f"{username}_stories")
+                            L.download_storyitem(item, target=f"{username}_highlights")
                             os.chdir("..")
 
-                        story_data = StoryData(date, caption, caption_mentions)
-                        stories.append(story_data)
+                            highlight_data = HighlightData(title, date, caption, caption_mentions)
+                            highlights.append(highlight_data)
                     except Exception as e:
-                        print(f"Failed to fetch story: {e}")
+                        print(f"Failed to fetch highlight: {e}")
                         continue
             except Exception as e:
-                print(f"Stories fetching not completed: {e}")
+                print(f"Highlights fetching not completed: {e}")
 
     # delete all useless file in posts dir to reduce disk usage
     posts_dir = f"./{username}_insta_profile/{username}_posts"
@@ -232,13 +280,13 @@ def ft_instaloader(url):
             if file.endswith(".json.xz"):
                 os.remove(os.path.join(stories_dir, file))
 
-    return InstagramData(private, username, full_name, bio, bio_hashtags, bio_mentions, followees_count, followers_count, external_url, media_count, followees, followed_hashtags, posts, stories)
+    # delete all useless file in highlights dir to reduce disk usage
+    highlights_dir = f"./{username}_insta_profile/{username}_highlights"
+    if os.path.exists(highlights_dir):
+        highlights_files = os.listdir(highlights_dir)
+        for file in highlights_files:
+            if file.endswith(".json.xz"):
+                os.remove(os.path.join(highlights_dir, file))
 
-
-
-
-if __name__ == "__main__":
-    account = input("Enter the target username: ").strip()
-    url = f"https://www.instagram.com/{account}/"
-    res = ft_instaloader(url)
-    print(res)
+    # convert dataclass to json and return it
+    return url, json.dumps(asdict(InstagramData(private, username, full_name, bio, bio_hashtags, bio_mentions, followees_count, followers_count, external_url, media_count, followees, followed_hashtags, posts, stories, highlights)), ensure_ascii=False)

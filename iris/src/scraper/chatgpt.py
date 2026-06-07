@@ -26,8 +26,9 @@ def ft_call_chatgpt(scraped_data, api_key):
     RÈGLES IMPORTANTES :
     1. Si une des catégories de la structure de base est manquante, assigne-lui la valeur "Inconnu".
     2. Ajoute ensuite une clé "Infos" (dictionnaire) où tu organiseras librement toutes les autres informations pertinentes trouvées (Métiers, Passions, Formations, Contacts, Proches, etc...).
-    3. N'intègre ces "Infos" libres que si elles sont crédibles. S'il y a un doute, ajoute " ?" à la fin de la valeur en question, après la valeur pas la clé.
-    4. Ne renvoie QUE le JSON valide, sans formatage Markdown, sans aucun texte avant ou après.
+    3. Tu peux essayer de deviner ses proches ou centre d'intérêts grâce à ses abonnements par exemples ou ses mentions ou d'autres informations pouvant être utiles.
+    4. N'intègre ces "Infos" libres que si elles sont crédibles. S'il y a un doute, ajoute " ?" à la fin de la valeur en question, après la valeur pas la clé.
+    5. Ne renvoie QUE le JSON valide, sans formatage Markdown, sans aucun texte avant ou après.
     """
 
     try:
