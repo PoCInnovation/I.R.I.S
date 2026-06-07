@@ -45,7 +45,6 @@ async def ft_scraper(urls):
 
         # launch all scraping tasks for each url
         tasks = []
-        insta_tasks = {}
         for url in urls:
             if "instagram.com/" in url:
                 task = asyncio.create_task(asyncio.to_thread(ft_instaloader, url))
