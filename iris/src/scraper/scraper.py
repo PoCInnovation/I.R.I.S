@@ -33,13 +33,15 @@ async def ft_scraper(urls):
             args=["--disable-blink-features=AutomationControlled"]
         )
         
-        ## INSTRUCTIONS ##
-        # if it is your first time running this script you need to uncomment these lines below which will provides you
-        # 10min to connect manually on linkedin insta twitter facebook tiktok or any other platform you need or want
-        # and ensure that you allow all cookies or close any pop up and then you can close all the tabs
-        # to do this do not forget to pass the headless argument to False in the lines above
-        # please do not use your personal accounts use fake ones that you have already created before
-        # note: you can run it multiple times or increase the sleep time if you want to connect on many other platforms
+        '''
+        INSTRUCTIONS
+            if it is your first time running this script you need to uncomment these lines below which will provides you
+            10min to connect manually on linkedin insta twitter facebook tiktok or any other platform you need or want
+            and ensure that you allow all cookies or close any pop up and then you can close all the tabs
+            to do this do not forget to pass the headless argument to False in the lines above
+            please do not use your personal accounts use fake ones that you have already created before
+            note: you can run it multiple times or increase the sleep time if you want to connect on many other platforms
+        '''
         ###await asyncio.sleep(600)
         ###return "Context successfully set! You can now run the script again for better results"
 

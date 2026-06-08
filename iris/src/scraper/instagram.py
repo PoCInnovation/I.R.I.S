@@ -8,6 +8,12 @@ import json
 
 
 
+'''
+INSTRUCTIONS
+    if you encounter the error: "400 Bad Request - "fail" status, message "invalid request" when accessing https://www.instagram.com/graphql/query"
+    please follow the instructions provided at this link: https://github.com/instaloader/instaloader/issues/2695#issuecomment-4495719808
+'''
+
 # create strcut to store collected infos on instagram highlights
 @dataclass
 class HighlightData:
@@ -113,6 +119,7 @@ def ft_instaloader(url):
         profile = instaloader.Profile.from_username(L.context, target)
     except Exception as e:
         print(f"Failed to load {target} profile: {e}")
+        print("You may want to take a look at the instructions in instagram.py")
         print("Fallback on default scraping")
         return url, None
 
