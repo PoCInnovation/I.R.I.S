@@ -119,7 +119,7 @@ def ft_instaloader(url):
         profile = instaloader.Profile.from_username(L.context, target)
     except Exception as e:
         print(f"Failed to load {target} profile: {e}")
-        print("You may want to take a look at the instructions in instagram.py")
+        print("400 Bad Request? You may want to take a look at the instructions in instagram.py")
         print("Fallback on default scraping")
         return url, None
 
@@ -181,10 +181,25 @@ def ft_instaloader(url):
             if user_response == "":
                 user_response = "n"
 
-        # if yes then get all posts
+        # if yes then get posts
         if user_response == "y":
             try:
+                # ask user how many posts he wants to scrap
+                posts_wanted = 0
+                while posts_wanted not in range(1, media_count + 1):
+                    posts_wanted = input(f"How many posts do you want to scrap? (1-{media_count}, all by default): ").strip()
+                    if posts_wanted == "":
+                        posts_wanted = media_count
+                    else:
+                        try:
+                            posts_wanted = int(posts_wanted)
+                        except:
+                            pass
+
+                posts_scraped = 0
                 for post in profile.get_posts():
+                    if posts_scraped >= posts_wanted:
+                        break
                     try:
                         date = str(post.date_local)
                         try:
@@ -203,6 +218,7 @@ def ft_instaloader(url):
     
                         post_data = PostData(date, location, title, caption, tagged_users)
                         posts.append(post_data)
+                        posts_scraped += 1
                     except Exception as e:
                         print(f"Failed to fetch post: {e}")
                         continue
