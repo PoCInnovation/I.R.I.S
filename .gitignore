@@ -8,3 +8,5 @@ iris/captures/
 *.jpeg
 *.png
 *.egg-info
+.env
+context/
