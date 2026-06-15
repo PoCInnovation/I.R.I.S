@@ -1,15 +1,17 @@
-"""End-to-end IRIS pipeline runner — live webcam mode.
+"""End-to-end IRIS pipeline runner.
 
-Opens the webcam, runs face detection in real time, and on `s` triggers
-the OSINT pipeline on every face currently in frame:
+Two input modes:
+  * webcam (default) — open the camera, press `s` to run the pipeline
+    on every face currently in frame, `q` to quit.
+  * --image PATH — skip the camera, run the pipeline on a single image
+    file. Useful for testing with someone else's portrait.
+
+For every detected face:
     detect -> reverse-search (Yandex) -> scraper (Playwright + ChatGPT)
-
-Press `q` to quit. The reverse-search + scrape pass is slow (tens of
-seconds), so the webcam window pauses while the pipeline runs and
-results are printed to the terminal.
 
 Usage:
     python -m iris.src.scripts.run_pipeline [--camera N] [--show-browser] [--max-urls K]
+    python -m iris.src.scripts.run_pipeline --image path/to/portrait.jpg
 """
 
 from __future__ import annotations
@@ -98,6 +100,26 @@ def draw_hud(frame: np.ndarray, faces: list[Face], fps: float) -> None:
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
 
+def image_mode(image_path: Path, max_urls: int, show_browser: bool) -> None:
+    """Run the pipeline on every face found in a single image file."""
+    print(f">> loading image {image_path}")
+    image = cv2.imread(str(image_path))
+    if image is None:
+        raise SystemExit(f"Cannot read image: {image_path}")
+
+    print(">> loading model...")
+    detector = FaceDetector(model_path=MODEL_PATH, imgsz=320)
+    faces = detector.detect(image)
+    print(f">> detected {len(faces)} face(s) in {image_path.name}")
+    if not faces:
+        return
+
+    crops = [face.crop for face in faces]
+    asyncio.run(
+        run_pipeline_on_crops(crops, max_urls=max_urls, show_browser=show_browser)
+    )
+
+
 def webcam_loop(camera: int, max_urls: int, show_browser: bool) -> None:
     print(">> loading model...")
     detector = FaceDetector(model_path=MODEL_PATH, imgsz=192)
@@ -154,7 +176,13 @@ def main() -> None:
     # Load .env from project root before any module reads env vars.
     load_dotenv(PROJECT_ROOT / ".env")
 
-    parser = argparse.ArgumentParser(description="Run the IRIS pipeline live on the webcam.")
+    parser = argparse.ArgumentParser(description="Run the IRIS pipeline.")
+    parser.add_argument(
+        "--image",
+        type=Path,
+        default=None,
+        help="Run the pipeline on this image file instead of the webcam.",
+    )
     parser.add_argument("--camera", type=int, default=0, help="Webcam index (default: 0).")
     parser.add_argument(
         "--show-browser",
@@ -168,7 +196,11 @@ def main() -> None:
         help=f"Max URLs per face to forward to the scraper (default: {DEFAULT_MAX_URLS_PER_FACE}).",
     )
     args = parser.parse_args()
-    webcam_loop(args.camera, args.max_urls, args.show_browser)
+
+    if args.image is not None:
+        image_mode(args.image, args.max_urls, args.show_browser)
+    else:
+        webcam_loop(args.camera, args.max_urls, args.show_browser)
 
 
 if __name__ == "__main__":
