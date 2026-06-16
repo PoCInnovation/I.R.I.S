@@ -8,6 +8,8 @@ iris/captures/
 *.jpeg
 *.png
 *.egg-info
+.env
+context/
 context/
 .env
 *_insta_profile/
