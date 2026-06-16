@@ -4,3 +4,5 @@ playwright
 dotenv
 playwright-stealth
 openai
+instaloader
+browser-cookie3
