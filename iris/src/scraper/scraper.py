@@ -20,7 +20,7 @@ from playwright_stealth import Stealth
 
 from .chatgpt import ft_call_chatgpt
 from .parser import ft_get_and_parse_html
-from instagram import ft_instaloader
+from .instagram import ft_instaloader
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CONTEXT_DIR = PROJECT_ROOT / "context"
