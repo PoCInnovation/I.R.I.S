@@ -8,3 +8,4 @@ iris/captures/
 *.jpeg
 *.png
 *.egg-info
+playwright_firefox_profile
