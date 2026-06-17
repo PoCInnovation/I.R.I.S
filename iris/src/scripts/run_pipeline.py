@@ -23,12 +23,31 @@ import time
 from pathlib import Path
 
 import cv2
+import subprocess
 import numpy as np
 from dotenv import load_dotenv
 
 from iris.src.detection.face_detector import Face, FaceDetector
 from iris.src.reverse_search import yandex_reverse_search
 from iris.src.scraper.scraper import ft_scraper
+
+## Commande et lien pour récup le flux hololens
+ffmpeg_path = r"C:\ffmpeg-2026-06-08-git-6028720d70-full_build\ffmpeg-2026-06-08-git-6028720d70-full_build\bin\ffmpeg.exe"
+cmd = [
+    ffmpeg_path,
+    "-i", "https://Iris:Iris2026*@192.168.1.14/api/holographic/stream/live.mp4",
+    "-f", "rawvideo",
+    "-pix_fmt", "bgr24",
+    "-"
+]
+pipe = subprocess.Popen(
+    cmd,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.DEVNULL
+)
+width, height = 1280, 720
+frame_size = width * height * 3
+## Fin commande et lien hololens
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 MODEL_PATH = PROJECT_ROOT / "iris" / "src" / "models" / "yolov11n-face.pt"
@@ -133,22 +152,18 @@ def webcam_loop(camera: int, max_urls: int, show_browser: bool) -> None:
     fps_smoothed = 0.0
     try:
         while True:
-            t0 = time.perf_counter()
-            ok, frame = cap.read()
-            if not ok:
+            raw = pipe.stdout.read(frame_size)
+            if len(raw) != frame_size:
                 print("Failed to read frame from webcam")
                 break
 
+            frame = np.frombuffer(raw, np.uint8).reshape((height, width, 3)).copy()
             faces = detector.detect(frame)
             # Snapshot crops BEFORE drawing HUD so the pipeline sees clean pixels.
             crops = [face.crop for face in faces]
 
             draw_hud(frame, faces, fps_smoothed)
             cv2.imshow("I.R.I.S - pipeline", frame)
-
-            elapsed = time.perf_counter() - t0
-            inst = 1.0 / elapsed if elapsed > 0 else 0.0
-            fps_smoothed = 0.9 * fps_smoothed + 0.1 * inst
 
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
