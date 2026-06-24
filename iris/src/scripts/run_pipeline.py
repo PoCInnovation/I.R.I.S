@@ -26,6 +26,7 @@ import cv2
 import subprocess
 import numpy as np
 from dotenv import load_dotenv
+import json
 
 from iris.src.detection.face_detector import Face, FaceDetector
 from iris.src.reverse_search import yandex_reverse_search
@@ -96,6 +97,13 @@ async def run_pipeline_on_crops(
         print("\n  OSINT profile:")
         if isinstance(result, dict):
             pprint.pprint(result, indent=4, width=100)
+            target_path = PROJECT_ROOT / "last_target.json"
+            try:
+                with open(target_path, "w", encoding="utf-8") as f:
+                    json.dump(result, f, ensure_ascii=False, indent=4)
+                print(f"Profile saved in: {target_path}")
+            except Exception as e:
+                print(f"Error saving JSON: {e}")
         else:
             print(f"    {result}")
 
