@@ -97,7 +97,7 @@ async def ft_scraper(urls: list[str]) -> dict | str:
             url, content = await tsk
 
             if "instagram.com/" in url:
-                if content != None:
+                if content is not None:
                     results.append(f"|START              URL:{url}\nCONTENT:{content}              END|")
                 # if insta function fails then fallback on default function
                 else:

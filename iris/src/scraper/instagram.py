@@ -193,7 +193,7 @@ def ft_instaloader(url):
                     else:
                         try:
                             posts_wanted = int(posts_wanted)
-                        except:
+                        except (ValueError, TypeError):
                             pass
 
                 posts_scraped = 0

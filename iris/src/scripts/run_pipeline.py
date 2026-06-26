@@ -19,7 +19,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import pprint
-import time
 from pathlib import Path
 
 import cv2

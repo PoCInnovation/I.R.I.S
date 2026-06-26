@@ -48,7 +48,7 @@ def main() -> None:
 
             # Snapshot the clean crops BEFORE drawing anything on `frame`, so
             # saved images don't have HUD overlays baked into them.
-            crops = [frame[f.y1:f.y2, f.x1:f.x2].copy() for f in faces]
+            crops = [frame[f.y1:f.y2, f.x1:f.x2].copy() for f in faces]  # noqa: F841 (used by commented-out capture below)
 
             # Corner-bracket HUD: 8 short lines per face — one horizontal arm
             # and one vertical arm at each of the 4 corners, all extending
