@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "dev/**", "feature/**"]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Lint
+        run: ruff check .
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      # Register the `iris` package without pulling the full dependency tree:
+      # the RAM guard only needs ultralytics + a couple of libs. This skips
+      # compiling dlib (face-recognition) and downloading Playwright/Chromium,
+      # neither of which the tests exercise -- keeping CI fast and reliable.
+      - name: Install package (no deps) + test requirements
+        run: |
+          pip install -e . --no-deps
+          pip install ultralytics opencv-python-headless psutil numpy pytest
+      - name: Run tests
+        run: pytest -q
