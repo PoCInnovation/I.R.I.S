@@ -1,16 +1,27 @@
 """End-to-end IRIS pipeline runner.
 
-Two input modes:
-  * webcam (default) — open the camera, press `s` to run the pipeline
-    on every face currently in frame, `q` to quit.
-  * --image PATH — skip the camera, run the pipeline on a single image
+Input modes:
+  * live (default) — read frames from a source, press `s` to run the pipeline
+    on every face currently in frame, `q` to quit. Two sources:
+      - hololens (default): the HoloLens video stream, decoded by ffmpeg.
+        Configured via .env (see IRIS_HOLOLENS_URL below).
+      - webcam: a local camera (--source webcam [--camera N]).
+  * --image PATH — skip the live source, run the pipeline on a single image
     file. Useful for testing with someone else's portrait.
 
 For every detected face:
     detect -> reverse-search (Yandex) -> scraper (Playwright + ChatGPT)
 
+HoloLens is configured through environment variables (loaded from .env):
+    IRIS_HOLOLENS_URL      full stream URL, may embed credentials, e.g.
+                           https://user:pass@192.168.1.14/api/holographic/stream/live.mp4
+    IRIS_FFMPEG_PATH       ffmpeg binary (default: "ffmpeg", i.e. on PATH)
+    IRIS_HOLOLENS_WIDTH    stream width in px  (default: 1280)
+    IRIS_HOLOLENS_HEIGHT   stream height in px (default: 720)
+
 Usage:
-    python -m iris.src.scripts.run_pipeline [--camera N] [--show-browser] [--max-urls K]
+    python -m iris.src.scripts.run_pipeline                      # HoloLens (default)
+    python -m iris.src.scripts.run_pipeline --source webcam --camera 0
     python -m iris.src.scripts.run_pipeline --image path/to/portrait.jpg
 """
 
@@ -18,37 +29,21 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+import os
 import pprint
+import subprocess
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import cv2
-import subprocess
 import numpy as np
 from dotenv import load_dotenv
-import json
 
 from iris.src.detection.face_detector import Face, FaceDetector
 from iris.src.reverse_search import yandex_reverse_search
 from iris.src.scraper.scraper import ft_scraper
-
-## Commande et lien pour récup le flux hololens
-ffmpeg_path = r"C:\ffmpeg-2026-06-08-git-6028720d70-full_build\ffmpeg-2026-06-08-git-6028720d70-full_build\bin\ffmpeg.exe"
-cmd = [
-    ffmpeg_path,
-    "-i", "https://Iris:Iris2026*@192.168.1.14/api/holographic/stream/live.mp4",
-    "-f", "rawvideo",
-    "-pix_fmt", "bgr24",
-    "-"
-]
-pipe = subprocess.Popen(
-    cmd,
-    stdout=subprocess.PIPE,
-    stderr=subprocess.DEVNULL
-)
-width, height = 1280, 720
-frame_size = width * height * 3
-## Fin commande et lien hololens
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 MODEL_PATH = PROJECT_ROOT / "iris" / "src" / "models" / "yolov11n-face.pt"
@@ -147,31 +142,105 @@ def image_mode(image_path: Path, max_urls: int, show_browser: bool) -> None:
     )
 
 
-def webcam_loop(camera: int, max_urls: int, show_browser: bool) -> None:
-    print(">> loading model...")
-    detector = FaceDetector(model_path=MODEL_PATH, imgsz=192)
+# --- Frame sources -------------------------------------------------------
+# Both are lazy generators: the ffmpeg subprocess / camera is opened only once
+# iteration starts, never at import. That keeps --image mode and plain module
+# imports side-effect free (the old code spawned ffmpeg at import time). Each
+# source releases its resource in a finally block, including on .close().
 
+HOLOLENS_URL_ENV = "IRIS_HOLOLENS_URL"
+
+
+def _hololens_frames(
+    url: str, ffmpeg_path: str, width: int, height: int
+) -> Iterator[np.ndarray]:
+    """Yield BGR frames from the HoloLens stream, decoded by ffmpeg.
+
+    ffmpeg re-encodes the stream to raw bgr24; we read one full frame's worth
+    of bytes per iteration off its stdout. A short read means the stream ended
+    or was truncated, so we stop.
+    """
+    cmd = [ffmpeg_path, "-i", url, "-f", "rawvideo", "-pix_fmt", "bgr24", "-"]
+    try:
+        pipe = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except FileNotFoundError:
+        raise SystemExit(
+            f"ffmpeg not found at {ffmpeg_path!r}. Install ffmpeg or set "
+            f"IRIS_FFMPEG_PATH in your .env to its full path."
+        )
+
+    frame_size = width * height * 3
+    try:
+        while True:
+            raw = pipe.stdout.read(frame_size)
+            if len(raw) != frame_size:
+                print("HoloLens stream ended (or frame truncated).")
+                break
+            yield np.frombuffer(raw, np.uint8).reshape((height, width, 3)).copy()
+    finally:
+        pipe.terminate()
+        try:
+            pipe.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pipe.kill()
+
+
+def _webcam_frames(camera: int) -> Iterator[np.ndarray]:
+    """Yield BGR frames from a local webcam via OpenCV."""
     print(f">> opening camera (index={camera})...")
     cap = cv2.VideoCapture(camera)
     if not cap.isOpened():
         raise SystemExit(f"Failed to open webcam (index {camera})")
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                print("Failed to read frame from webcam.")
+                break
+            yield frame
+    finally:
+        cap.release()
+
+
+def _hololens_frames_from_env() -> Iterator[np.ndarray]:
+    """Build the HoloLens frame source from environment (.env) settings."""
+    url = os.environ.get(HOLOLENS_URL_ENV)
+    if not url:
+        raise SystemExit(
+            f"{HOLOLENS_URL_ENV} is not set. Add it to your .env, e.g.\n"
+            f"  {HOLOLENS_URL_ENV}=https://user:pass@192.168.1.14"
+            f"/api/holographic/stream/live.mp4\n"
+            f"or run with --source webcam."
+        )
+    ffmpeg_path = os.environ.get("IRIS_FFMPEG_PATH", "ffmpeg")
+    width = int(os.environ.get("IRIS_HOLOLENS_WIDTH", "1280"))
+    height = int(os.environ.get("IRIS_HOLOLENS_HEIGHT", "720"))
+    print(">> connecting to HoloLens stream via ffmpeg...")
+    return _hololens_frames(url, ffmpeg_path, width, height)
+
+
+def live_loop(
+    frames: Iterator[np.ndarray], *, max_urls: int, show_browser: bool
+) -> None:
+    """Detect faces on a live frame stream. `s` runs the pipeline, `q` quits."""
+    print(">> loading model...")
+    detector = FaceDetector(model_path=MODEL_PATH, imgsz=192)
 
     fps_smoothed = 0.0
     try:
-        while True:
-            raw = pipe.stdout.read(frame_size)
-            if len(raw) != frame_size:
-                print("Failed to read frame from webcam")
-                break
-
-            frame = np.frombuffer(raw, np.uint8).reshape((height, width, 3)).copy()
+        for frame in frames:
+            t0 = time.perf_counter()
             faces = detector.detect(frame)
             # Snapshot crops BEFORE drawing HUD so the pipeline sees clean pixels.
             crops = [face.crop for face in faces]
 
             draw_hud(frame, faces, fps_smoothed)
             cv2.imshow("I.R.I.S - pipeline", frame)
+
+            elapsed = time.perf_counter() - t0
+            inst = 1.0 / elapsed if elapsed > 0 else 0.0
+            fps_smoothed = 0.9 * fps_smoothed + 0.1 * inst
 
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
@@ -181,8 +250,8 @@ def webcam_loop(camera: int, max_urls: int, show_browser: bool) -> None:
                     print(">> no face in frame, nothing to search.")
                     continue
                 print(f">> running pipeline on {len(crops)} face(s)...")
-                # Release the camera while the (slow) pipeline runs.
-                cap.release()
+                # Stop the capture (free camera/ffmpeg) while the slow pipeline runs.
+                frames.close()
                 cv2.destroyAllWindows()
                 asyncio.run(
                     run_pipeline_on_crops(
@@ -191,7 +260,7 @@ def webcam_loop(camera: int, max_urls: int, show_browser: bool) -> None:
                 )
                 return
     finally:
-        cap.release()
+        frames.close()
         cv2.destroyAllWindows()
 
 
@@ -206,7 +275,15 @@ def main() -> None:
         default=None,
         help="Run the pipeline on this image file instead of the webcam.",
     )
-    parser.add_argument("--camera", type=int, default=0, help="Webcam index (default: 0).")
+    parser.add_argument(
+        "--source",
+        choices=["hololens", "webcam"],
+        default="hololens",
+        help="Live frame source (default: hololens). Ignored when --image is given.",
+    )
+    parser.add_argument(
+        "--camera", type=int, default=0, help="Webcam index for --source webcam (default: 0)."
+    )
     parser.add_argument(
         "--show-browser",
         action="store_true",
@@ -222,8 +299,13 @@ def main() -> None:
 
     if args.image is not None:
         image_mode(args.image, args.max_urls, args.show_browser)
+        return
+
+    if args.source == "webcam":
+        frames = _webcam_frames(args.camera)
     else:
-        webcam_loop(args.camera, args.max_urls, args.show_browser)
+        frames = _hololens_frames_from_env()
+    live_loop(frames, max_urls=args.max_urls, show_browser=args.show_browser)
 
 
 if __name__ == "__main__":
