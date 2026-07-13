@@ -1,7 +1,6 @@
 import asyncio
 import random
 import os
-import sys
 import argparse
 from pathlib import Path
 from dotenv import load_dotenv
@@ -72,7 +71,7 @@ async def login(page) -> None:
     await login_btn.click()
 
     # Keycloak login form — not the anti-bot gate, so filling instantly is safe.
-    await page.wait_for_selector("#username", timeout=15_000)
+    await page.wait_for_selector("#username", timeout=30_000)
     await human_pause(0.4, 0.7)
     await page.locator("#username").fill(PIMEYES_EMAIL)
     await human_pause(0.15, 0.3)
@@ -106,7 +105,7 @@ async def click_human_checkbox(page, timeout_s: float = 30.0) -> None:
       1. Target the actual <input> (a ~28px square), not the 302x80 widget
          wrapper — clicking the wrapper's centre misses the checkbox entirely.
       2. The input renders a few seconds AFTER the upload, so we wait for it to
-         become visible (up to timeout_s) instead of giving up immediately.
+       become visible (up to timeout_s) instead of giving up immediately.
 
     The click MUST go through `page.mouse.move()` + down/up, not
     `locator.click()`: with Camoufox's humanize enabled, only an explicit mouse
@@ -143,7 +142,7 @@ async def click_human_checkbox(page, timeout_s: float = 30.0) -> None:
     print(f"[camoufox] clicked 'I am human' checkbox at ({cx:.0f}, {cy:.0f})")
 
 
-async def start_search(page) -> None:
+async def start_search(page, allow_manual: bool = True) -> None:
     """Wait for Start Search to become enabled — the real solved-state signal —
     then click it once and wait for the results page.
 
@@ -151,19 +150,39 @@ async def start_search(page) -> None:
     cleared, so its enablement is our ground truth. If it doesn't enable quickly,
     Prosopo most likely escalated to an image grid we don't auto-solve: the
     window is visible, so solve it by hand and this picks up automatically.
+
+    If allow_manual is True and the captcha fails, prompts the user to solve it manually.
     """
     start_btn = page.locator(
         "button:has-text('Start Search'):not([disabled]):not(.disabled)"
     ).first
     print("[camoufox] waiting for Start Search to become enabled...")
+    
     try:
         await start_btn.wait_for(state="visible", timeout=20_000)
     except Exception:
         print(
-            "[camoufox] Start Search still disabled — Prosopo likely escalated to "
-            "an image challenge. Solve it by hand in the open window; waiting..."
+            "[camoufox] Start Search still disabled after 20s — captcha likely failed"
         )
-        await start_btn.wait_for(state="visible", timeout=180_000)
+        
+        if allow_manual:
+            print("[camoufox] ================================================")
+            print("[camoufox] CAPTCHA FAILED - MANUAL SOLVE REQUIRED")
+            print("[camoufox] Please solve the captcha challenge in the browser window.")
+            print("[camoufox] Once solved, the script will continue automatically.")
+            print("[camoufox] ================================================")
+            
+            # Wait indefinitely for manual solve, polling every 2 seconds
+            while True:
+                await asyncio.sleep(2)
+                if await start_btn.count() > 0 and await start_btn.is_visible():
+                    print("[camoufox] Start Search is now enabled - continuing...")
+                    break
+        else:
+            print(
+                "[camoufox] Manual solve disabled. Solve it by hand in the open window; waiting..."
+            )
+            await start_btn.wait_for(state="visible", timeout=180_000)
 
     await human_pause(0.3, 0.6)
     print("[camoufox] clicking Start Search")
@@ -216,7 +235,7 @@ async def main() -> None:
         # Build a natural behavioural trail before doing anything sensitive.
         await warm_up(page)
 
-        await login(page)
+        #await login(page)
         await upload_image(page, args.image_path)
 
         # The only gate after upload is the Prosopo captcha — tick it, then let
