@@ -1,0 +1,14 @@
+asyncio
+bs4
+playwright
+dotenv
+playwright-stealth
+openai
+instaloader
+browser-cookie3
+opencv-python
+numpy
+ultralytics
+face_recognition
+flask
+flask-cors
