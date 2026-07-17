@@ -1,5 +1,6 @@
 .venv/
 __pycache__/
+__init__.py
 *.pyc
 iris/src/models/
 iris/src/output/
@@ -9,3 +10,11 @@ iris/captures/
 *.png
 *.egg-info
 playwright_firefox_profile
+pimeyes_profile
+.env
+.env
+context/
+context/
+.env
+*_insta_profile/
+last_target.json
