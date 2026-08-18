@@ -12,3 +12,5 @@ ultralytics
 face_recognition
 flask
 flask-cors
+imagehash
+Pillow
