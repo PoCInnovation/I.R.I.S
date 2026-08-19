@@ -33,7 +33,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROFILE_DIR = PROJECT_ROOT / "pimeyes_profile"
 
 UPLOAD_INPUT = 'input[type="file"][multiple]'
-SEARCH_MODAL = "div.fixed.inset-0.z-100"
+# The search modal is a full-screen overlay. Its utility classes churn with every
+# PimEyes redesign (it used to carry `z-100`, which is now applied by a rule
+# instead of a class), so we match only the two stable positioning classes and
+# disambiguate by content: the overlay is the one containing Start Search.
+SEARCH_MODAL = "div.fixed.inset-0"
 PROSOPO_INPUT = "input[type='checkbox'][data-cy='captcha-checkbox']"
 PROSOPO_CHECKBOX = "prosopo-procaptcha .prosopo-checkbox"
 START_SEARCH_NAME = "Start Search"
@@ -251,7 +255,14 @@ async def _run_search(
 
             await _upload(page, tmp_path)
 
-            modal = page.locator(SEARCH_MODAL).first
+            # Scope by content, not by class: the page also renders a hero
+            # "Start Search" button outside any overlay, so filtering on it
+            # picks exactly the upload modal.
+            modal = (
+                page.locator(SEARCH_MODAL)
+                .filter(has=page.get_by_role("button", name=START_SEARCH_NAME))
+                .first
+            )
             await modal.wait_for(state="visible", timeout=20_000)
 
             await _accept_consent(modal)
