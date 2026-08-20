@@ -1,7 +1,6 @@
 .venv/
 __pycache__/
 *.pyc
-iris/src/models/
 iris/src/output/
 iris/captures/
 *.jpg
@@ -16,3 +15,4 @@ context/
 last_target.json
 playwright_firefox_profile
 pimeyes_profile
+.aider*
