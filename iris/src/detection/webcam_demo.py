@@ -1,7 +1,6 @@
 # To run : python -m iris.src.detection.webcam_demo
 import time
 from pathlib import Path
-
 import cv2
 from .face_detector import FaceDetector
 
@@ -42,6 +41,10 @@ def main() -> None:
                 break
 
             faces = detector.detect(frame)
+            if faces:
+                closest_face = max(faces, key=lambda f: (f.x2 - f.x1) * (f.y2 - f.y1))
+                faces = [closest_face]
+
             frame_n += 1
             if frame_n % 10 == 0:
                 print(f">> frame {frame_n}  faces={len(faces)}  fps={fps_smoothed:.1f}")
