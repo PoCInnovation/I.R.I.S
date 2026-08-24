@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 import cv2
 import numpy as np
@@ -19,6 +20,32 @@ from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 
 YANDEX_IMAGES_URL = "https://yandex.com/images/"
+# Yandex's face-match index leans heavily adult (large volume, aggressive
+# similarity matching), so unrelated faces routinely turn up on these sites.
+# Not exhaustive — just the domains that show up often enough to be worth
+# dropping before they reach the scraper.
+BLOCKED_DOMAINS = frozenset({
+    "pornhub.com",
+    "xvideos.com",
+    "xnxx.com",
+    "xhamster.com",
+    "redtube.com",
+    "youporn.com",
+    "spankbang.com",
+    "eporner.com",
+    "tnaflix.com",
+    "chaturbate.com",
+    "onlyfans.com",
+    "thothub.tv",
+    "fapello.com",
+})
+
+
+def _is_blocked(url: str) -> bool:
+    netloc = urlparse(url).netloc.lower().removeprefix("www.")
+    return netloc in BLOCKED_DOMAINS or any(
+        netloc.endswith(f".{domain}") for domain in BLOCKED_DOMAINS
+    )
 # The "Search by image" camera button. Yandex serves a few variants
 # depending on layout bucket; we try them in order.
 CBIR_BUTTON_SELECTORS = (
@@ -124,6 +151,8 @@ async def yandex_reverse_search(
                     for anchor in await page.locator(selector).all():
                         href = await anchor.get_attribute("href")
                         if not href or not href.startswith("http") or href in seen:
+                            continue
+                        if _is_blocked(href):
                             continue
                         seen.add(href)
                         urls.append(href)

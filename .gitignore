@@ -2,7 +2,6 @@
 __pycache__/
 __init__.py
 *.pyc
-iris/src/models/
 iris/src/output/
 iris/captures/
 *.jpg
@@ -18,4 +17,6 @@ context/
 .env
 *_insta_profile/
 last_target.json
-pimeyes_results/
+playwright_firefox_profile
+pimeyes_profile
+.aider*

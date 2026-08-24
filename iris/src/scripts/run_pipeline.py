@@ -10,7 +10,7 @@ Input modes:
     file. Useful for testing with someone else's portrait.
 
 For every detected face:
-    detect -> reverse-search (Yandex) -> scraper (Playwright + ChatGPT)
+    detect -> reverse-search (Yandex, PimEyes, or Social, --backend) -> scraper (Playwright + ChatGPT)
 
 HoloLens is configured through environment variables (loaded from .env):
     IRIS_HOLOLENS_URL      full stream URL, may embed credentials, e.g.
@@ -23,6 +23,8 @@ Usage:
     python -m iris.src.scripts.run_pipeline                      # HoloLens (default)
     python -m iris.src.scripts.run_pipeline --source webcam --camera 0
     python -m iris.src.scripts.run_pipeline --image path/to/portrait.jpg
+    python -m iris.src.scripts.run_pipeline --source webcam --backend social
+    python -m iris.src.scripts.run_pipeline --source webcam --backend pimeyes --show-browser
 """
 
 from __future__ import annotations
@@ -42,12 +44,13 @@ import numpy as np
 from dotenv import load_dotenv
 
 from iris.src.detection.face_detector import Face, FaceDetector
-from iris.src.reverse_search import yandex_reverse_search
+from iris.src.reverse_search import pimeyes_reverse_search, social_reverse_search, yandex_reverse_search
 from iris.src.scraper.scraper import ft_scraper
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 MODEL_PATH = PROJECT_ROOT / "iris" / "src" / "models" / "yolov11n-face.pt"
 DEFAULT_MAX_URLS_PER_FACE = 5
+REVERSE_SEARCH_BACKENDS = ("yandex", "pimeyes", "social")
 
 
 async def run_pipeline_on_crops(
@@ -55,12 +58,14 @@ async def run_pipeline_on_crops(
     *,
     max_urls: int,
     show_browser: bool,
+    backend: str = "yandex",
+    auto_only: bool = False,
 ) -> None:
     """Reverse-search each crop, then feed the URLs to the scraper.
 
-    Sequential by design: Yandex tolerates a single stealth session
-    better than three in parallel, and the scraper already fans out
-    per-URL internally.
+    Sequential by design: both backends tolerate a single stealth/browser
+    session better than several in parallel, and the scraper already fans
+    out per-URL internally.
     """
     for i, crop in enumerate(crops, start=1):
         print(f"\n--- Face {i}/{len(crops)} ---")
@@ -70,9 +75,18 @@ async def run_pipeline_on_crops(
 
         # Isolate each face: a failure on face #1 must not skip #2 and #3.
         try:
-            urls = await yandex_reverse_search(
-                crop, max_results=max_urls, headless=not show_browser
-            )
+            if backend == "pimeyes":
+                urls = await pimeyes_reverse_search(
+                    crop, max_results=max_urls, headless=not show_browser, auto_only=auto_only
+                )
+            elif backend == "social":
+                urls = await social_reverse_search(
+                    crop, max_results=max_urls, headless=not show_browser
+                )
+            else:
+                urls = await yandex_reverse_search(
+                    crop, max_results=max_urls, headless=not show_browser
+                )
         except Exception as e:
             print(f"  reverse search crashed: {e}")
             continue
@@ -122,7 +136,9 @@ def draw_hud(frame: np.ndarray, faces: list[Face], fps: float) -> None:
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
 
-def image_mode(image_path: Path, max_urls: int, show_browser: bool) -> None:
+def image_mode(
+    image_path: Path, max_urls: int, show_browser: bool, backend: str, auto_only: bool
+) -> None:
     """Run the pipeline on every face found in a single image file."""
     print(f">> loading image {image_path}")
     image = cv2.imread(str(image_path))
@@ -138,7 +154,9 @@ def image_mode(image_path: Path, max_urls: int, show_browser: bool) -> None:
 
     crops = [face.crop for face in faces]
     asyncio.run(
-        run_pipeline_on_crops(crops, max_urls=max_urls, show_browser=show_browser)
+        run_pipeline_on_crops(
+            crops, max_urls=max_urls, show_browser=show_browser, backend=backend, auto_only=auto_only
+        )
     )
 
 
@@ -221,7 +239,12 @@ def _hololens_frames_from_env() -> Iterator[np.ndarray]:
 
 
 def live_loop(
-    frames: Iterator[np.ndarray], *, max_urls: int, show_browser: bool
+    frames: Iterator[np.ndarray],
+    *,
+    max_urls: int,
+    show_browser: bool,
+    backend: str = "yandex",
+    auto_only: bool = False,
 ) -> None:
     """Detect faces on a live frame stream. `s` runs the pipeline, `q` quits."""
     print(">> loading model...")
@@ -255,7 +278,11 @@ def live_loop(
                 cv2.destroyAllWindows()
                 asyncio.run(
                     run_pipeline_on_crops(
-                        crops, max_urls=max_urls, show_browser=show_browser
+                        crops,
+                        max_urls=max_urls,
+                        show_browser=show_browser,
+                        backend=backend,
+                        auto_only=auto_only,
                     )
                 )
                 return
@@ -287,7 +314,7 @@ def main() -> None:
     parser.add_argument(
         "--show-browser",
         action="store_true",
-        help="Run Yandex's Chromium in visible mode (debug).",
+        help="Run the reverse-search browser in visible mode (debug).",
     )
     parser.add_argument(
         "--max-urls",
@@ -295,17 +322,36 @@ def main() -> None:
         default=DEFAULT_MAX_URLS_PER_FACE,
         help=f"Max URLs per face to forward to the scraper (default: {DEFAULT_MAX_URLS_PER_FACE}).",
     )
+    parser.add_argument(
+        "--backend",
+        choices=REVERSE_SEARCH_BACKENDS,
+        default="yandex",
+        help="Reverse-search backend to use (default: yandex). "
+        "'social' filters Yandex results to known social-media domains.",
+    )
+    parser.add_argument(
+        "--auto-only",
+        action="store_true",
+        help="pimeyes backend only: never fall back to the VNC human CAPTCHA "
+        "handoff, give up after automated retries instead.",
+    )
     args = parser.parse_args()
 
     if args.image is not None:
-        image_mode(args.image, args.max_urls, args.show_browser)
+        image_mode(args.image, args.max_urls, args.show_browser, args.backend, args.auto_only)
         return
 
     if args.source == "webcam":
         frames = _webcam_frames(args.camera)
     else:
         frames = _hololens_frames_from_env()
-    live_loop(frames, max_urls=args.max_urls, show_browser=args.show_browser)
+    live_loop(
+        frames,
+        max_urls=args.max_urls,
+        show_browser=args.show_browser,
+        backend=args.backend,
+        auto_only=args.auto_only,
+    )
 
 
 if __name__ == "__main__":
