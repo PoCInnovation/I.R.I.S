@@ -1,5 +1,6 @@
 .venv/
 __pycache__/
+__init__.py
 *.pyc
 iris/src/output/
 iris/captures/
@@ -7,6 +8,9 @@ iris/captures/
 *.jpeg
 *.png
 *.egg-info
+playwright_firefox_profile
+pimeyes_profile
+.env
 .env
 context/
 context/
