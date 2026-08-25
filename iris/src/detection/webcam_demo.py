@@ -31,6 +31,7 @@ def main() -> None:
     # smoothing makes the on-screen number readable.
     fps_smoothed = 0.0
     frame_n = 0
+    selected_idx = 0
     try:
         while True:
             frame_start = time.perf_counter()
@@ -41,9 +42,11 @@ def main() -> None:
                 break
 
             faces = detector.detect(frame)
+
+            # Search in the faces the closest and keep it
             if faces:
-                closest_face = max(faces, key=lambda f: (f.x2 - f.x1) * (f.y2 - f.y1))
-                faces = [closest_face]
+                faces = sorted(faces, key=lambda f: (f.x2 - f.x1) * (f.y2 - f.y1), reverse=True)
+                faces = [faces[selected_idx % len(faces)]]
 
             frame_n += 1
             if frame_n % 10 == 0:
@@ -91,6 +94,8 @@ def main() -> None:
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
                 break
+            elif key == ord("c"):
+                selected_idx += 1
             # if key == ord("s"):
             #     ts = int(time.time())
             #     for i, crop in enumerate(crops):
