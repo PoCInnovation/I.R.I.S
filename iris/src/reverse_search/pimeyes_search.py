@@ -6,8 +6,13 @@ the search. Runs headless-by-default on an off-screen virtual display (Xvfb) and
 tries to solve the CAPTCHA automatically; if a human is required, it reveals the
 same live session over VNC (x11vnc + a viewer) so it can be solved in place —
 no relaunch, no re-upload. Every failure path returns an empty list so the
-pipeline never crashes mid-run. Results themselves are paywalled, so URL
-extraction is out of scope: on success the search URL is logged and [] returned.
+pipeline never crashes mid-run.
+
+On the results page it harvests, per match, the thumbnail of the photo and the
+domain PimEyes prints on the tile — the pair `iris/src/scripts/crawler.py` needs
+to walk that site and recover the page URL the paywall withholds. Records come
+back as `PimEyesMatch` (see pimeyes_results.py); the legacy `list[str]` entry
+point still exists and returns just the sites.
 
 See docs/pimeyes_search.md for a full walkthrough of the tools and flow.
 """
@@ -15,11 +20,13 @@ See docs/pimeyes_search.md for a full walkthrough of the tools and flow.
 from __future__ import annotations
 
 import asyncio
+import base64
 import enum
 import random
 import shutil
 import subprocess
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import cv2
@@ -27,6 +34,14 @@ import numpy as np
 from camoufox.async_api import AsyncCamoufox
 from camoufox.exceptions import VirtualDisplayError
 from camoufox.virtdisplay import VirtualDisplay
+
+from iris.src.reverse_search.pimeyes_results import (
+    DOMAIN_RE,
+    PimEyesMatch,
+    normalize_site,
+    save_matches,
+    with_local_path,
+)
 
 PIMEYES_URL = "https://pimeyes.com/en"
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -56,6 +71,67 @@ FAILURE_SCREENSHOT = Path("/tmp/iris_pimeyes_failure.png")
 FAILURE_HTML = Path("/tmp/iris_pimeyes_failure.html")
 
 FACE_NOT_FOUND_TEXT = "Faces not found"
+
+RESULTS_DIR = PROJECT_ROOT / "pimeyes_results"
+# A result tile is a square card holding the thumbnail; the same card prints the
+# source domain on a button. Utility classes churn, but the grid has been square
+# cards since the redesign and `aspect-square` is the one class that says so.
+RESULT_TILE_IMG = "div.aspect-square img"
+# The grid streams in over a few seconds; treat it as settled once the tile count
+# stops moving rather than guessing a fixed sleep.
+GRID_SETTLE_POLLS = 3
+GRID_SETTLE_INTERVAL_S = 1.5
+GRID_MAX_WAIT_S = 25.0
+
+_MIME_EXT = {
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
+
+# Read the tiles in document order (= PimEyes' relevance order), tagging each
+# image so a failed byte-fetch can fall back to screenshotting that exact node.
+_COLLECT_TILES_JS = """
+() => {
+    const out = [];
+    for (const tile of document.querySelectorAll('div.aspect-square')) {
+        const img = tile.querySelector('img');
+        if (!img) continue;
+        const src = img.currentSrc || img.src || '';
+        if (!src) continue;
+        // Buttons and links only. The <span> wrapping them has a textContent of
+        // "numerama.comMore" — no separator between children — which reads as a
+        // perfectly well-formed hostname and would be crawled as one.
+        const labels = [...tile.querySelectorAll('button, a')]
+            .map(el => (el.textContent || '').trim())
+            .filter(Boolean);
+        img.setAttribute('data-iris-idx', String(out.length));
+        out.push({ src, labels });
+    }
+    return out;
+}
+"""
+
+# Thumbnails are blob: URLs minted by the page, so there is nothing to download
+# from outside: fetch them in the page's own context and hand back base64. This
+# also keeps the original bytes intact — screenshotting the <img> would capture
+# the CSS `object-cover` crop instead of the photo PimEyes matched.
+_FETCH_BYTES_JS = """
+async (src) => {
+    const resp = await fetch(src);
+    if (!resp.ok) return null;
+    const blob = await resp.blob();
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = '';
+    const CHUNK = 0x8000;  // chunked: String.fromCharCode blows the stack on big arrays
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    }
+    return { type: blob.type || '', data: btoa(binary) };
+}
+"""
 
 
 def _is_search_url(url: str) -> bool:
@@ -312,6 +388,116 @@ async def _solve_with_retries(page, tmp_path: Path, timeout_ms: int) -> tuple[bo
     return False, modal
 
 
+async def _wait_for_grid(page) -> int:
+    """Wait until the results grid stops growing; return the tile count."""
+    try:
+        await page.wait_for_selector(RESULT_TILE_IMG, timeout=int(GRID_MAX_WAIT_S * 1000))
+    except Exception:
+        return 0
+
+    previous, stable, waited = -1, 0, 0.0
+    while waited < GRID_MAX_WAIT_S:
+        count = await page.locator(RESULT_TILE_IMG).count()
+        stable = stable + 1 if count == previous else 0
+        if stable >= GRID_SETTLE_POLLS:
+            break
+        previous = count
+        await asyncio.sleep(GRID_SETTLE_INTERVAL_S)
+        waited += GRID_SETTLE_INTERVAL_S
+    return await page.locator(RESULT_TILE_IMG).count()
+
+
+def _pick_domain(labels: list[str]) -> str:
+    """First label on the tile that is actually a hostname.
+
+    The button row also carries a "More" action whose text is localized, so we
+    match on shape rather than skipping a known word.
+    """
+    for label in labels:
+        if DOMAIN_RE.match(label.strip()):
+            return label.strip()
+    return ""
+
+
+async def _save_thumbnail(page, src: str, dom_index: int, dest: Path) -> Path | None:
+    """Save one result thumbnail, preferring the original bytes over a repaint."""
+    try:
+        payload = await page.evaluate(_FETCH_BYTES_JS, src)
+    except Exception as e:
+        print(f"  [pimeyes] thumbnail {dom_index} fetch failed: {str(e)[:60]}")
+        payload = None
+
+    if payload and payload.get("data"):
+        path = dest.with_suffix(_MIME_EXT.get(payload.get("type", ""), ".jpg"))
+        try:
+            path.write_bytes(base64.b64decode(payload["data"]))
+            return path
+        except Exception as e:
+            print(f"  [pimeyes] thumbnail {dom_index} write failed: {str(e)[:60]}")
+
+    # Fallback: repaint the node itself. Loses whatever `object-cover` crops, but
+    # a cropped thumbnail still beats no thumbnail.
+    path = dest.with_suffix(".png")
+    try:
+        await page.locator(f'img[data-iris-idx="{dom_index}"]').first.screenshot(
+            path=str(path)
+        )
+        return path
+    except Exception as e:
+        print(f"  [pimeyes] thumbnail {dom_index} screenshot failed: {str(e)[:60]}")
+        return None
+
+
+async def _collect_matches(page, max_results: int, out_dir: Path) -> list[PimEyesMatch]:
+    """Harvest (image, site) pairs from the results grid.
+
+    Never raises: a broken selector or a redesigned tile has to degrade to fewer
+    matches, not to a crashed pipeline.
+    """
+    try:
+        count = await _wait_for_grid(page)
+        if not count:
+            await _dump_failure(page, "results grid never appeared")
+            return []
+
+        tiles = await page.evaluate(_COLLECT_TILES_JS)
+    except Exception as e:
+        await _dump_failure(page, f"results grid unreadable: {e}")
+        return []
+
+    matches: list[PimEyesMatch] = []
+    skipped = 0
+    for dom_index, tile in enumerate(tiles):
+        if len(matches) >= max_results:
+            break
+        domain = _pick_domain(tile.get("labels") or [])
+        if not domain:
+            # The uploaded face is rendered in a square tile too, but carries no
+            # source domain — this is what filters it out.
+            skipped += 1
+            continue
+
+        index = len(matches)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        local = await _save_thumbnail(
+            page, tile.get("src", ""), dom_index, out_dir / f"{index:03d}"
+        )
+        matches.append(
+            with_local_path(
+                PimEyesMatch(
+                    index=index,
+                    domain=domain,
+                    site=normalize_site(domain),
+                    thumbnail_url=tile.get("src", ""),
+                ),
+                local,
+            )
+        )
+
+    print(f"  [pimeyes] {len(matches)} match(es) harvested ({skipped} tile(s) without a domain)")
+    return matches
+
+
 async def _run_search(
     tmp_path: Path,
     *,
@@ -319,7 +505,9 @@ async def _run_search(
     timeout_ms: int,
     manual_solve_timeout_ms: int,
     auto_only: bool,
-) -> _Outcome:
+    max_results: int,
+    out_dir: Path,
+) -> tuple[_Outcome, list[PimEyesMatch]]:
     async with AsyncCamoufox(
         headless=False,
         virtual_display=virtual_display,
@@ -345,28 +533,31 @@ async def _run_search(
                 await _dump_failure(
                     page, "PimEyes rejected the crop (\"Faces not found\") — not a CAPTCHA issue, skipping human handoff"
                 )
-                return _Outcome.FACE_NOT_FOUND
+                return _Outcome.FACE_NOT_FOUND, []
 
             if not solved:
                 if auto_only:
                     await _dump_failure(page, "Prosopo not cleared after auto retries (auto_only, no human fallback)")
-                    return _Outcome.CAPTCHA_UNSOLVED
+                    return _Outcome.CAPTCHA_UNSOLVED, []
                 if not await _human_captcha_handoff(
                     page, modal, virtual_display, manual_solve_timeout_ms
                 ):
                     await _dump_failure(page, "Prosopo not cleared")
-                    return _Outcome.CAPTCHA_UNSOLVED
+                    return _Outcome.CAPTCHA_UNSOLVED, []
             else:
                 print("  [pimeyes] cleared automatically, no human needed")
 
             await _start_search(page, modal, timeout_ms)
         except Exception as e:
             await _dump_failure(page, f"search failed: {e}")
-            return _Outcome.ERROR
+            return _Outcome.ERROR, []
 
         await _human_pause(0.8, 1.6)
         print(f"  [pimeyes] search page: {page.url}")
-        return _Outcome.REACHED
+        # Must happen inside the context manager: the thumbnails are blob: URLs
+        # that only exist while this page is alive.
+        matches = await _collect_matches(page, max_results, out_dir)
+        return _Outcome.REACHED, matches
 
 
 async def _human_captcha_handoff(
@@ -390,7 +581,7 @@ async def _human_captcha_handoff(
         _stop_reveal(reveal)
 
 
-async def pimeyes_reverse_search(
+async def pimeyes_reverse_search_matches(
     face_crop: np.ndarray,
     *,
     max_results: int = 10,
@@ -398,11 +589,29 @@ async def pimeyes_reverse_search(
     manual_solve_timeout_ms: int = 180_000,
     headless: bool = True,
     auto_only: bool = False,
-) -> list[str]:
-    """
-    auto_only: if True, never fall back to the VNC human handoff — give up
-        (return []) after MAX_AUTO_ATTEMPTS automated tries. Useful to
-        measure how often the automated solve succeeds on its own.
+    output_dir: Path | None = None,
+) -> list[PimEyesMatch]:
+    """Run a PimEyes search and return one record per match.
+
+    Each record pairs a matched photo (saved under `output_dir`) with the domain
+    PimEyes says it came from — the map the crawler turns into exact page URLs.
+    Use `by_image()` / `by_site()` from `pimeyes_results` to view it as a dict.
+
+    Args:
+        face_crop: BGR image array, typically a `Face.crop` from `FaceDetector`.
+        max_results: cap on matches harvested from the grid.
+        timeout_ms: per-step browser timeout.
+        manual_solve_timeout_ms: how long to wait for a human on the CAPTCHA.
+        headless: True runs on an invisible virtual display with VNC-on-demand.
+        auto_only: if True, never fall back to the VNC human handoff — give up
+            (return []) after MAX_AUTO_ATTEMPTS automated tries. Useful to
+            measure how often the automated solve succeeds on its own.
+        output_dir: where thumbnails + matches.json land. Defaults to a fresh
+            timestamped directory under `pimeyes_results/`.
+
+    Returns:
+        Match records in PimEyes' relevance order — empty on any failure, so a
+        broken search degrades to "no match" instead of killing the pipeline.
     """
     h, w = face_crop.shape[:2]
     print(f"  [pimeyes] face crop: {w}x{h}px")
@@ -410,6 +619,10 @@ async def pimeyes_reverse_search(
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         cv2.imwrite(tmp.name, face_crop)
         tmp_path = Path(tmp.name)
+
+    if output_dir is None:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        output_dir = RESULTS_DIR / stamp
 
     vdisplay = None
     display: str | None = None
@@ -426,14 +639,18 @@ async def pimeyes_reverse_search(
             display = None
 
     try:
-        outcome = await _run_search(
+        outcome, matches = await _run_search(
             tmp_path,
             virtual_display=display,
             timeout_ms=timeout_ms,
             manual_solve_timeout_ms=manual_solve_timeout_ms,
             auto_only=auto_only,
+            max_results=max_results,
+            out_dir=output_dir,
         )
         print(f"  [pimeyes] outcome: {outcome.value}")
+    except Exception as e:
+        print(f"  [pimeyes] search aborted: {e}")
         return []
     finally:
         tmp_path.unlink(missing_ok=True)
@@ -442,6 +659,41 @@ async def pimeyes_reverse_search(
                 vdisplay.kill()
             except Exception:
                 pass
+
+    if matches:
+        manifest = save_matches(matches, output_dir)
+        print(f"  [pimeyes] {len(matches)} match(es) -> {manifest}")
+    return matches
+
+
+async def pimeyes_reverse_search(
+    face_crop: np.ndarray,
+    *,
+    max_results: int = 10,
+    timeout_ms: int = 60_000,
+    manual_solve_timeout_ms: int = 180_000,
+    headless: bool = True,
+    auto_only: bool = False,
+) -> list[str]:
+    """Sites a face was found on, deduplicated, in relevance order.
+
+    The flat `list[str]` shape the pipeline's other engines speak. These are
+    origins, not page URLs — PimEyes paywalls the path, so pair them with the
+    thumbnails from `pimeyes_reverse_search_matches` and crawl to recover it.
+    """
+    matches = await pimeyes_reverse_search_matches(
+        face_crop,
+        max_results=max_results,
+        timeout_ms=timeout_ms,
+        manual_solve_timeout_ms=manual_solve_timeout_ms,
+        headless=headless,
+        auto_only=auto_only,
+    )
+    sites: list[str] = []
+    for match in matches:
+        if match.site and match.site not in sites:
+            sites.append(match.site)
+    return sites
 
 
 async def _dump_failure(page, reason: str) -> None:
