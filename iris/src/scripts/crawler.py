@@ -20,16 +20,15 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import time
 from collections import deque
 from collections.abc import Iterator
 from io import BytesIO
-from urllib.parse import urljoin, urlparse
 
 import imagehash
 import requests
-from bs4 import BeautifulSoup
 from PIL import Image
+
+import subprocess
 
 HEADERS = {
     "User-Agent": (
@@ -38,9 +37,7 @@ HEADERS = {
     ),
     "Accept-Language": "en-US,en;q=0.9",
 }
-PAGE_TIMEOUT_S = 10
 IMAGE_TIMEOUT_S = 5
-CRAWL_DELAY_S = 2
 
 # face_recognition's own default tolerance for "same person" (Euclidean
 # distance between 128-d embeddings). Lower = stricter.
@@ -65,54 +62,35 @@ def _crawl_images(start_url: str, max_pages: int) -> Iterator[tuple[str, bytes]]
 
     Shared by both matching modes so the BFS/scoping logic isn't duplicated.
     """
-    site_domain = urlparse(start_url).netloc.lower().removeprefix("www.")
+
     session = requests.Session()
     session.headers.update(HEADERS)
+    
+    process = subprocess.Popen(
+        ["./crawler_rs/crawler_rs", str(start_url), str(max_pages)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
 
-    visited: set[str] = set()
-    queue: deque[str] = deque([start_url])
-
-    while queue and len(visited) < max_pages:
-        url = queue.popleft()
-        if url in visited:
+    seen: set[str] = set()
+    for url in process.stdout:
+        full_url = url.strip()
+        if not full_url or full_url in seen:
             continue
-        visited.add(url)
-        print(f"[crawler] scanning {url}")
+        seen.add(full_url)
 
         try:
-            resp = session.get(url, timeout=PAGE_TIMEOUT_S)
-        except Exception as e:
-            print(f"[crawler] request failed: {e}")
-            continue
-
-        if resp.status_code != 200:
-            print(f"[crawler] blocked or unavailable ({resp.status_code})")
-            continue
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-
-        for img in soup.find_all("img"):
-            src = img.get("src")
-            if not src or src.endswith(".svg") or src.startswith("data:"):
-                continue
-            full_url = urljoin(url, src)
-
-            try:
-                img_resp = session.get(full_url, timeout=IMAGE_TIMEOUT_S)
-                content_type = img_resp.headers.get("Content-Type", "")
-                if not content_type.startswith("image/"):
-                    continue
-            except Exception:
+            img_resp = session.get(full_url, timeout=IMAGE_TIMEOUT_S)
+            content_type = img_resp.headers.get("Content-Type", "")
+            if not content_type.startswith("image/"):
                 continue
 
             yield full_url, img_resp.content
-
-        for a in soup.find_all("a", href=True):
-            next_url = urljoin(url, a["href"])
-            if _same_site(urlparse(next_url).netloc, site_domain) and next_url not in visited:
-                queue.append(next_url)
-
-        time.sleep(CRAWL_DELAY_S)
+        except Exception:
+            continue
+        
+    process.wait()
 
 
 def crawl_for_matching_images(
