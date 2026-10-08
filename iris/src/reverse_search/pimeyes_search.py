@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import enum
+import os
 import random
 import shutil
 import subprocess
@@ -57,6 +58,12 @@ SEARCH_MODAL = "div[data-modal]"
 PROSOPO_INPUT = "input[type='checkbox'][data-cy='captcha-checkbox']"
 PROSOPO_CHECKBOX = "prosopo-procaptcha .prosopo-checkbox"
 START_SEARCH_NAME = "Start Search"
+
+# Nav auth button: gains `.logged-in` once signed in ("My account"), otherwise
+# reads "Log In". Keycloak form fields are the standard #username / #password.
+AUTH_BUTTON = "button.auth"
+LOGIN_BUTTON = "button.auth:not(.logged-in)"
+LOGGED_IN_BUTTON = "button.auth.logged-in"
 
 HUMANIZE_CAP = 2.5
 
@@ -165,6 +172,63 @@ async def _face_not_found(modal) -> bool:
 
 async def _human_pause(lo: float = 0.3, hi: float = 0.7) -> None:
     await asyncio.sleep(random.uniform(lo, hi))
+
+
+async def _login(page) -> bool:
+    """Sign in with the PimEyes subscription so searches use the paid account.
+
+    Credentials come from PIMEYES_EMAIL / PIMEYES_PASSWORD in the environment
+    (loaded from .env by the entrypoints). If either is unset we skip login and
+    fall back to the persistent profile / anonymous session — same as the old
+    behaviour, so an un-provisioned checkout never breaks the pipeline.
+
+    Returns True if we end up authenticated (freshly or from a saved session),
+    False if we deliberately stayed anonymous. Any failure is swallowed: a
+    broken login must not crash the run (every other path here returns empty
+    rather than raising), so we log and carry on unauthenticated.
+    """
+    email = os.environ.get("PIMEYES_EMAIL")
+    password = os.environ.get("PIMEYES_PASSWORD")
+    if not email or not password:
+        print("  [pimeyes] no PIMEYES_EMAIL/PIMEYES_PASSWORD set — staying anonymous")
+        return False
+
+    try:
+        logged_in_btn = page.locator(LOGGED_IN_BUTTON).first
+        login_btn = page.locator(LOGIN_BUTTON).first
+        # The persistent profile may already carry an authenticated session;
+        # poll briefly for whichever nav button renders first (~4s).
+        for _ in range(40):
+            if await logged_in_btn.count() > 0:
+                print("  [pimeyes] already logged in (persistent session)")
+                return True
+            if await login_btn.count() > 0 and await login_btn.is_visible():
+                break
+            await asyncio.sleep(0.1)
+        else:
+            print("  [pimeyes] no Log In button found — assuming logged in")
+            return True
+
+        print("  [pimeyes] logging in with subscription account...")
+        await login_btn.click()
+
+        # Keycloak login form — not the anti-bot gate, so filling is safe.
+        await page.wait_for_selector("#username", timeout=30_000)
+        await _human_pause(0.4, 0.7)
+        await page.locator("#username").fill(email)
+        await _human_pause(0.15, 0.3)
+        await page.locator("#password").fill(password)
+        await _human_pause(0.2, 0.4)
+        await page.locator("#kc-login").click()
+
+        await page.wait_for_url("**/pimeyes.com/**", timeout=20_000)
+        await page.wait_for_load_state("domcontentloaded")
+        await _human_pause(0.5, 0.9)
+        print(f"  [pimeyes] logged in, url: {page.url}")
+        return True
+    except Exception as e:
+        print(f"  [pimeyes] login failed ({str(e)[:80]}) — continuing anonymously")
+        return False
 
 
 async def _wander_cursor(page, moves: int = 3) -> None:
@@ -526,6 +590,11 @@ async def _run_search(
                 PIMEYES_URL, wait_until="domcontentloaded", timeout=timeout_ms
             )
             await _human_pause(0.6, 1.2)
+
+            # Authenticate with the subscription before uploading so the search
+            # runs against the paid account (skips/anonymous if creds unset).
+            await _login(page)
+            await _human_pause(0.4, 0.9)
 
             try:
                 solved, modal = await _solve_with_retries(page, tmp_path, timeout_ms)
