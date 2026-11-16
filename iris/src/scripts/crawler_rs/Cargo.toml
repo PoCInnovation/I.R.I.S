@@ -1,0 +1,9 @@
+[package]
+name = "crawler_rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+scraper = "0.27.0"
+spider = "2.53.9"
+url = "2.5.8"
